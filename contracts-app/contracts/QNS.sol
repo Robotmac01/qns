@@ -43,6 +43,12 @@ contract QNS {
     uint64 public constant MAX_YEARS = 10;
     uint256 public constant MAX_DEADLINE_WINDOW = 1 hours;
 
+    /// @dev Commit-reveal window (as on ENS): a registration must be committed
+    ///      at least MIN_COMMITMENT_AGE and at most MAX_COMMITMENT_AGE earlier,
+    ///      so nobody can watch the mempool and take the name first.
+    uint256 public constant MIN_COMMITMENT_AGE = 60 seconds;
+    uint256 public constant MAX_COMMITMENT_AGE = 1 days;
+
     // Action ids. Each one is part of the signed message, so a signature for
     // one action can never be replayed as another.
     uint8 public constant ACTION_REGISTER = 1; // proof of possession of a new guardian
@@ -71,9 +77,13 @@ contract QNS {
     mapping(bytes32 node => string) public labelOf;
     mapping(bytes32 slot => string) private _texts; // keccak(node, version, key)
     mapping(address account => bytes32 node) public primaryNode;
+    mapping(bytes32 commitment => uint256 timestamp) public commitments;
 
     address public admin;
     bytes32 public adminGuardian;
+    /// @dev One counter shared by every admin action. With the action id inside
+    ///      the signed message, a used admin signature can never be replayed,
+    ///      for the same action or any other.
     uint64 public adminNonce;
 
     /// @notice Price per year in wei for labels of length 3, 4 and 5+.
@@ -85,6 +95,7 @@ contract QNS {
     // Events
     // ------------------------------------------------------------------
 
+    event Committed(bytes32 indexed commitment, uint256 timestamp);
     event NameRegistered(bytes32 indexed node, string label, address indexed owner, uint64 expires, bytes32 guardian);
     event NameRenewed(bytes32 indexed node, uint64 expires);
     event AddrChanged(bytes32 indexed node, address addr);
@@ -116,6 +127,10 @@ contract QNS {
     error ZeroAddress();
     error TransferFailed();
     error Reentrancy();
+    error CommitmentMissing();
+    error CommitmentTooNew();
+    error CommitmentTooOld();
+    error UnexpiredCommitment();
 
     modifier nonReentrant() {
         if (_locked) revert Reentrancy();
@@ -188,8 +203,27 @@ contract QNS {
     }
 
     // ------------------------------------------------------------------
-    // Registration
+    // Registration (commit, wait MIN_COMMITMENT_AGE, then register)
     // ------------------------------------------------------------------
+
+    /// @notice The hash to commit before registering. `guardian` is keccak256 of
+    ///         the guardian public key, or bytes32(0) to use the account's own
+    ///         on-chain PQC key. `secret` is any random 32 bytes kept private
+    ///         until registration.
+    function makeCommitment(string calldata label, address owner, bytes32 guardian, bytes32 secret)
+        public
+        pure
+        returns (bytes32)
+    {
+        return keccak256(abi.encode(label, owner, guardian, secret));
+    }
+
+    /// @notice Step 1: publish a commitment. It reveals nothing about the name.
+    function commit(bytes32 commitment) external {
+        if (commitments[commitment] + MAX_COMMITMENT_AGE >= block.timestamp) revert UnexpiredCommitment();
+        commitments[commitment] = block.timestamp;
+        emit Committed(commitment, block.timestamp);
+    }
 
     /// @notice Register `<label>.qore` for `years_` years.
     /// @param guardianPubkey ML-DSA-87 public key that will guard the name. Pass
@@ -199,18 +233,25 @@ contract QNS {
     ///        authMessage(ACTION_REGISTER, node, msg.sender, 0, deadline, keccak(pubkey)).
     ///        Not needed (empty) when the account key is used: the chain already
     ///        checked its proof of possession.
+    /// @param secret The secret used in `makeCommitment` for this registration.
     function register(
         string calldata label,
         uint256 years_,
         bytes calldata guardianPubkey,
         bytes calldata possessionSig,
-        uint256 deadline
+        uint256 deadline,
+        bytes32 secret
     ) external payable nonReentrant returns (bytes32 node) {
         if (!_validLabel(bytes(label))) revert InvalidLabel();
+        // Bounded before any arithmetic: years_ * YEAR is at most 10 years.
         if (years_ == 0 || years_ > MAX_YEARS) revert BadYears();
         if (!available(label)) revert NotAvailable();
         uint256 price = rentPrice(label, years_);
         if (msg.value < price) revert InsufficientPayment(price);
+
+        _consumeCommitment(
+            makeCommitment(label, msg.sender, guardianPubkey.length == 0 ? bytes32(0) : keccak256(guardianPubkey), secret)
+        );
 
         node = nodeOf(label);
         bytes32 guardian;
@@ -241,6 +282,7 @@ contract QNS {
 
     /// @notice Anyone can pay to extend a name (as on ENS).
     function renew(string calldata label, uint256 years_) external payable nonReentrant {
+        // Bounded before any arithmetic: years_ * YEAR is at most 10 years.
         if (years_ == 0 || years_ > MAX_YEARS) revert BadYears();
         bytes32 node = nodeOf(label);
         Record storage r = _records[node];
@@ -432,6 +474,14 @@ contract QNS {
         return keccak256(pubkey);
     }
 
+    function _consumeCommitment(bytes32 commitment) private {
+        uint256 at = commitments[commitment];
+        if (at == 0) revert CommitmentMissing();
+        if (block.timestamp < at + MIN_COMMITMENT_AGE) revert CommitmentTooNew();
+        if (block.timestamp > at + MAX_COMMITMENT_AGE) revert CommitmentTooOld();
+        delete commitments[commitment];
+    }
+
     function _checkDeadline(uint256 deadline) private view {
         if (block.timestamp > deadline) revert DeadlinePassed();
         if (deadline > block.timestamp + MAX_DEADLINE_WINDOW) revert DeadlineTooFar();
@@ -448,6 +498,7 @@ contract QNS {
     }
 
     /// @dev 3-63 chars of a-z, 0-9 and '-', not starting or ending with '-'.
+    ///      The length is checked first, so the loop runs at most 63 times.
     function _validLabel(bytes memory b) private pure returns (bool) {
         uint256 n = b.length;
         if (n < 3 || n > 63) return false;

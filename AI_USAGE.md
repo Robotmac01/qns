@@ -13,8 +13,10 @@ This project was built with **Claude** (Anthropic) as a pair programmer, directe
   key hash, the non-ERC-721 decision and fail-closed decoding of the precompile result.
 - **Code.** Wrote `QNS.sol`, the precompile stand-in for tests, the test suite, the CLI, the scoped window
   command, the Ignition module and the React app.
-- **Checks.** Compiled, ran the 19 tests and the TypeScript checks, built the web app and looked at it in
+- **Checks.** Compiled, ran the tests (22) and the TypeScript checks, built the web app and looked at it in
   a headless browser.
+- **Audit follow-up.** Reviewed the QCAI stage 1 findings, fixed the real one (front-running, with
+  commit-reveal), answered the false positives with code comments and tests.
 
 ## What the author did
 
@@ -27,4 +29,4 @@ This project was built with **Claude** (Anthropic) as a pair programmer, directe
 - Tests use real ML-DSA-87 keys and signatures from `@qorechain/sdk`. The stand-in precompile only
   accepts triples the real verifier accepted first.
 - The testnet deployment calls the real `pqcVerify` precompile.
-- QCAI audit, two passes (see README).
+- QCAI audit, two passes (see README and `audits/`).

@@ -26,6 +26,7 @@ import {
   http,
   keccak256,
   parseEther,
+  toHex,
   zeroHash,
   type Address,
   type Hex,
@@ -115,14 +116,26 @@ const commands: Record<string, (args: string[]) => Promise<void>> = {
     const owner = wallet().account.address;
     const y = BigInt(years);
     const value = await read<bigint>("rentPrice", [label, y]);
-    if (flag === "--account-key") {
+    const useAccountKey = flag === "--account-key";
+    const kp = useAccountKey ? undefined : guardian();
+    const guardianId = kp ? guardianHash(kp) : zeroHash;
+
+    // Step 1: commit (hides the name), then wait out the 60 s minimum age.
+    const secret = toHex(crypto.getRandomValues(new Uint8Array(32)));
+    const commitment = await read<Hex>("makeCommitment", [label, owner, guardianId, secret]);
+    await write("commit", [commitment]);
+    const minAge = Number(await read<bigint>("MIN_COMMITMENT_AGE"));
+    console.log(`committed; waiting ${minAge + 5} s before registering...`);
+    await new Promise((r) => setTimeout(r, (minAge + 5) * 1000));
+
+    // Step 2: register (reveal).
+    if (useAccountKey) {
       // Guardian = the account's own ML-DSA-87 key, read on chain via pqcKeyStatus.
-      await write("register", [label, y, "0x", "0x", 0n], value);
+      await write("register", [label, y, "0x", "0x", 0n, secret], value);
     } else {
-      const kp = guardian();
       const node = await nodeOf(label);
-      const a = await authorise(kp, ACTIONS.REGISTER, node, owner, 0n, guardianHash(kp));
-      await write("register", [label, y, a.pubkey, a.signature, a.deadline], value);
+      const a = await authorise(kp!, ACTIONS.REGISTER, node, owner, 0n, guardianId);
+      await write("register", [label, y, a.pubkey, a.signature, a.deadline, secret], value);
     }
     console.log(`registered ${label}.qore`);
   },

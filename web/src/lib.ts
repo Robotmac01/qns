@@ -2,7 +2,7 @@ import { classifyEvmWindowRejection, type EvmWindowRejection } from "@qorechain/
 import { encodeAbiParameters, keccak256, type Address, type Hex } from "viem";
 
 // Default: the live testnet deployment (README). Override with VITE_QNS_ADDRESS.
-export const QNS = (import.meta.env.VITE_QNS_ADDRESS || "0x828a6E483C5A2c83C013B51f6058E987728D2348") as Address;
+export const QNS = (import.meta.env.VITE_QNS_ADDRESS || "0x6f23Dc0Ab6CB9dbE24dcf068b3ae424d8Be19c3E") as Address;
 export const REST = `${location.origin}/lcd`; // proxied to https://api-testnet.qore.host (Vite in dev, vercel.json in production)
 export const EXPLORER = "https://explore.qore.network";
 export const ZERO = "0x0000000000000000000000000000000000000000";

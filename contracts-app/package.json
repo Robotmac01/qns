@@ -8,9 +8,10 @@
     "build": "hardhat build",
     "test": "hardhat test",
     "window": "tsx --env-file=.env scripts/window.ts",
-    "deploy:testnet": "hardhat ignition deploy ignition/modules/QNS.ts --network qorechainTestnet --parameters ignition/parameters.json",
+    "deploy:testnet": "hardhat ignition deploy ignition/modules/QNS.ts --network qorechainTestnet --parameters ignition/parameters.json --deployment-id qns-v2",
     "qns": "tsx --env-file=.env scripts/qns.ts",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "derive-key": "tsx --env-file=.env scripts/derive-key.ts"
   },
   "dependencies": {
     "@cosmjs/stargate": "^0.39.0",

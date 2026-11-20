@@ -18,7 +18,7 @@ On QNS, the actions a thief wants all need **two signatures**:
 | Transfer the name (`transfer`) | owner + ML-DSA-87 guardian |
 | Replace the guardian (`rotateGuardian`) | owner + old guardian + proof of possession by the new key |
 | Withdraw fees, change prices, change admin | admin + ML-DSA-87 admin guardian |
-| Register | proof of possession by the guardian key (or the account's own on-chain PQC key via `pqcKeyStatus`) |
+| Register | commit-reveal (60 s wait, stops front-running) + proof of possession by the guardian key, or the account's own on-chain PQC key via `pqcKeyStatus` |
 | Text records, primary name, renew | classical (low risk, kept cheap) |
 
 Built for **Build Before Q-Day** (QoreChain Developer Fest), **Post-Quantum dApp** track. #BuildBeforeQDay
@@ -28,9 +28,11 @@ Built for **Build Before Q-Day** (QoreChain Developer Fest), **Post-Quantum dApp
 | | |
 | --- | --- |
 | Network | QoreChain testnet `qorechain-diana`, EVM chain id 9800 |
-| QNS contract | [`0x828a6E483C5A2c83C013B51f6058E987728D2348`](https://explore.qore.network/address/0x828a6E483C5A2c83C013B51f6058E987728D2348) |
+| QNS contract (v2, after audit fixes) | [`0x6f23Dc0Ab6CB9dbE24dcf068b3ae424d8Be19c3E`](https://explore.qore.network/address/0x6f23Dc0Ab6CB9dbE24dcf068b3ae424d8Be19c3E) |
+| QNS contract (v1) | [`0x828a6E483C5A2c83C013B51f6058E987728D2348`](https://explore.qore.network/address/0x828a6E483C5A2c83C013B51f6058E987728D2348) |
 | Example name | `okafor.qore` → `0xcf8239ff696253a5ec21b4d7db9fd6d43c3cd35f` (`qor1e7prnlmfvff6tmppkntah87k6s7re56ldawxpp`), set with a post-quantum guarded [`setAddr`](https://explore.qore.network/tx/0x18706d4a56b9f03ec5e2e156560e0cc0cf3f9205750be4f2ff4e183c45d5329e) |
 | Live app | https://qns-two.vercel.app |
+| Demo video | https://youtu.be/3eGpXKgE-rY |
 | Explorer | https://explore.qore.network |
 
 ## How it works
@@ -52,6 +54,8 @@ contract.authMessage(action, name, owner, nonce, deadline, payloadHash)
   and must hash to it.
 - **Names are not ERC-721 tokens on purpose.** A token standard would add a classical-only
   `transferFrom` that skips the guardian.
+- **No front-running.** Registration is commit-reveal, as on ENS: commit a hash of name, owner, guardian
+  and a secret, wait 60 seconds, then register.
 - **Fails closed.** If `pqcVerify` is not active (an inactive precompile returns empty data), every
   guarded action reverts.
 - **Two ways to choose a guardian.** A separate guardian code (works with QoreX in the browser today, since
@@ -68,7 +72,7 @@ contract.authMessage(action, name, owner, nonce, deadline, payloadHash)
 | --- | --- |
 | `contracts-app/contracts/QNS.sol` | the registry and resolver |
 | `contracts-app/contracts/interfaces/IQorePQC.sol` | QoreChain PQC precompile interface |
-| `contracts-app/test/QNS.ts` | 19 tests, with real ML-DSA-87 keys and signatures |
+| `contracts-app/test/QNS.ts` | 22 tests, with real ML-DSA-87 keys and signatures |
 | `contracts-app/scripts/qns.ts` | CLI: register, resolve, set-addr, transfer, withdraw |
 | `contracts-app/scripts/window.ts` | register the account's PQC key, open a normal or scoped EVM window |
 | `contracts-app/ignition/modules/QNS.ts` | Hardhat Ignition deploy |
@@ -85,7 +89,7 @@ https://dashboard.qorechain.io/faucet.
 cd contracts-app
 pnpm install
 cp .env.example .env            # PRIVATE_KEY of a fresh testnet account
-pnpm test                       # 19 passing
+pnpm test                       # 22 passing
 
 pnpm window recovery-code       # -> QORE_PQC_RECOVERY_CODE in .env (the account's own PQC key)
 pnpm window register            # bind the account's ML-DSA-87 key (once)
@@ -101,7 +105,7 @@ Put the deployed address in `.env` as `QNS_ADDRESS`, then:
 pnpm qns guardian-code          # -> QNS_GUARDIAN_CODE (guards your names; write it on paper)
 pnpm window scoped              # window that only admits calls to QNS
 pnpm qns price okafor
-pnpm qns register okafor 1      # or: pnpm qns register okafor 1 --account-key
+pnpm qns register okafor 1      # commits, waits 65 s, registers (or add --account-key)
 pnpm qns info okafor
 pnpm qns set-addr okafor 0x…    # post-quantum guarded
 pnpm qns resolve okafor
@@ -116,7 +120,7 @@ cp .env.example .env            # VITE_QNS_ADDRESS=0x…
 pnpm dev                        # http://localhost:5175
 ```
 
-Connect QoreX on the testnet, create or paste a guardian code, search a name, register. The guardian
+Connect QoreX on the testnet, create or paste a guardian code, search a name, start the timer, wait a minute, register. The guardian
 code stays in the tab's memory and is never stored or sent.
 
 ## Tests
@@ -129,7 +133,8 @@ Tampered messages, other keys and replays get `false`, as on chain. On the testn
 real precompile; the bytecode is the same.
 
 Covered: registration and pricing, label rules, proof of possession, the `pqcKeyStatus` path, the
-**Q-Day scenario** (attacker with the owner's classical key can't redirect the name), replay and
+**Q-Day scenario** (attacker with the owner's classical key can't redirect the name), front-running
+(commit-reveal), admin and per-name replay and
 cross-action reuse, deadlines, transfer with a new guardian, guardian rotation, expiry and grace period,
 fail-closed with an inactive precompile, admin actions.
 
@@ -144,10 +149,11 @@ fail-closed with an inactive precompile, admin actions.
 
 ## QCAI audit
 
-- First pass (before fixes): *link*
-- Second pass (after fixes): *link*
+Run with the QoreChain AI Smart Contract Auditor (dashboard.qorechain.io/audit).
 
-Run at https://dashboard.qorechain.io/audit with `contracts-app/contracts/QNS.sol`.
+- Stage 1, before fixes: [public report](https://qorechain-audit-reports-362958365954.s3.amazonaws.com/audits/QCAIA-1795172541719-CBA385BF/report.html), [findings and responses](audits/QCAI-stage-1.md). Score 78, Medium, 5 findings. One real issue
+  (front-running at registration) fixed with commit-reveal; the rest answered in the report.
+- [Stage 2, after fixes](audits/QCAI-stage-2.md)
 
 ## Credits
 

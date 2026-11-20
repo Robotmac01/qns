@@ -38,6 +38,21 @@ export const QNS_ABI = [
   },
   {
     "inputs": [],
+    "name": "CommitmentMissing",
+    "type": "error"
+  },
+  {
+    "inputs": [],
+    "name": "CommitmentTooNew",
+    "type": "error"
+  },
+  {
+    "inputs": [],
+    "name": "CommitmentTooOld",
+    "type": "error"
+  },
+  {
+    "inputs": [],
     "name": "DeadlinePassed",
     "type": "error"
   },
@@ -94,6 +109,11 @@ export const QNS_ABI = [
   },
   {
     "inputs": [],
+    "name": "UnexpiredCommitment",
+    "type": "error"
+  },
+  {
+    "inputs": [],
     "name": "WrongGuardian",
     "type": "error"
   },
@@ -138,6 +158,25 @@ export const QNS_ABI = [
       }
     ],
     "name": "AdminTransferred",
+    "type": "event"
+  },
+  {
+    "anonymous": false,
+    "inputs": [
+      {
+        "indexed": true,
+        "internalType": "bytes32",
+        "name": "commitment",
+        "type": "bytes32"
+      },
+      {
+        "indexed": false,
+        "internalType": "uint256",
+        "name": "timestamp",
+        "type": "uint256"
+      }
+    ],
+    "name": "Committed",
     "type": "event"
   },
   {
@@ -473,6 +512,19 @@ export const QNS_ABI = [
   },
   {
     "inputs": [],
+    "name": "MAX_COMMITMENT_AGE",
+    "outputs": [
+      {
+        "internalType": "uint256",
+        "name": "",
+        "type": "uint256"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [],
     "name": "MAX_DEADLINE_WINDOW",
     "outputs": [
       {
@@ -492,6 +544,19 @@ export const QNS_ABI = [
         "internalType": "uint64",
         "name": "",
         "type": "uint64"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [],
+    "name": "MIN_COMMITMENT_AGE",
+    "outputs": [
+      {
+        "internalType": "uint256",
+        "name": "",
+        "type": "uint256"
       }
     ],
     "stateMutability": "view",
@@ -681,6 +746,38 @@ export const QNS_ABI = [
     "inputs": [
       {
         "internalType": "bytes32",
+        "name": "commitment",
+        "type": "bytes32"
+      }
+    ],
+    "name": "commit",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "bytes32",
+        "name": "commitment",
+        "type": "bytes32"
+      }
+    ],
+    "name": "commitments",
+    "outputs": [
+      {
+        "internalType": "uint256",
+        "name": "timestamp",
+        "type": "uint256"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "bytes32",
         "name": "node",
         "type": "bytes32"
       }
@@ -694,6 +791,40 @@ export const QNS_ABI = [
       }
     ],
     "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "string",
+        "name": "label",
+        "type": "string"
+      },
+      {
+        "internalType": "address",
+        "name": "owner",
+        "type": "address"
+      },
+      {
+        "internalType": "bytes32",
+        "name": "guardian",
+        "type": "bytes32"
+      },
+      {
+        "internalType": "bytes32",
+        "name": "secret",
+        "type": "bytes32"
+      }
+    ],
+    "name": "makeCommitment",
+    "outputs": [
+      {
+        "internalType": "bytes32",
+        "name": "",
+        "type": "bytes32"
+      }
+    ],
+    "stateMutability": "pure",
     "type": "function"
   },
   {
@@ -849,6 +980,11 @@ export const QNS_ABI = [
         "internalType": "uint256",
         "name": "deadline",
         "type": "uint256"
+      },
+      {
+        "internalType": "bytes32",
+        "name": "secret",
+        "type": "bytes32"
       }
     ],
     "name": "register",

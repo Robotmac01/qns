@@ -68,18 +68,29 @@ describe("QNS - Qore Name Service", async () => {
       return { ...(await pqSign(kp, msg)), deadline };
     }
 
+    const SECRET = keccak256(toHex("qns-test-secret"));
+
+    /** Step 1 of registration: commit, then wait out MIN_COMMITMENT_AGE. */
+    async function commitFor(label: string, who: typeof alice, guardian: Hex, secret = SECRET, wait = 61) {
+      const c = await qns.read.makeCommitment([label, who.account.address, guardian, secret]);
+      await qns.write.commit([c], { account: who.account });
+      if (wait) await networkHelpers.time.increase(wait);
+      return c;
+    }
+
     async function register(label: string, who = alice, kp = aliceKey, years = 1n) {
+      await commitFor(label, who, guardianHash(kp));
       const node = await qns.read.nodeOf([label]);
       const deadline = (await now()) + 600n;
       const gh = guardianHash(kp);
       const msg = await qns.read.authMessage([ACTIONS.REGISTER, node, who.account.address, 0n, deadline, gh]);
       const { pubkey, signature } = await pqSign(kp, msg);
       const value = await qns.read.rentPrice([label, years]);
-      await qns.write.register([label, years, pubkey, signature, deadline], { value, account: who.account });
+      await qns.write.register([label, years, pubkey, signature, deadline, SECRET], { value, account: who.account });
       return node;
     }
 
-    return { qns, pre, auth, register, pqSign, now };
+    return { qns, pre, auth, register, pqSign, now, commitFor, SECRET };
   }
 
   const enc = (types: { type: string }[], values: unknown[]) => keccak256(encodeAbiParameters(types, values));
@@ -97,12 +108,13 @@ describe("QNS - Qore Name Service", async () => {
     });
 
     it("refunds overpayment and keeps the price", async () => {
-      const { qns, auth } = await deploy();
+      const { qns, auth, commitFor, SECRET } = await deploy();
+      await commitFor("refund", alice, guardianHash(aliceKey));
       const node = await qns.read.nodeOf(["refund"]);
       const a = await auth(aliceKey, ACTIONS.REGISTER, node, alice.account.address, guardianHash(aliceKey));
       // REGISTER signs with nonce 0 (the record does not exist yet), which `auth` reads.
       const before = await publicClient.getBalance({ address: qns.address });
-      await qns.write.register(["refund", 1n, a.pubkey, a.signature, a.deadline], {
+      await qns.write.register(["refund", 1n, a.pubkey, a.signature, a.deadline, SECRET], {
         value: parseEther("3"),
         account: alice.account,
       });
@@ -120,33 +132,34 @@ describe("QNS - Qore Name Service", async () => {
       const { qns, register } = await deploy();
       for (const bad of ["ab", "Okafor", "-ok", "ok-", "ok_k", "a".repeat(64)]) {
         await viem.assertions.revertWithCustomError(
-          qns.write.register([bad, 1n, "0x", "0x", 0n], { value: parseEther("50"), account: alice.account }),
+          qns.write.register([bad, 1n, "0x", "0x", 0n, zeroHash], { value: parseEther("50"), account: alice.account }),
           qns,
           "InvalidLabel",
         );
       }
       await register("taken");
       await viem.assertions.revertWithCustomError(
-        qns.write.register(["taken", 1n, "0x", "0x", 0n], { value: parseEther("50"), account: bob.account }),
+        qns.write.register(["taken", 1n, "0x", "0x", 0n, zeroHash], { value: parseEther("50"), account: bob.account }),
         qns,
         "NotAvailable",
       );
       await viem.assertions.revertWithCustomError(
-        qns.write.register(["cheap", 1n, "0x", "0x", 0n], { value: 1n, account: bob.account }),
+        qns.write.register(["cheap", 1n, "0x", "0x", 0n, zeroHash], { value: 1n, account: bob.account }),
         qns,
         "InsufficientPayment",
       );
     });
 
     it("refuses a guardian key the registrant cannot prove it holds", async () => {
-      const { qns, now } = await deploy();
+      const { qns, now, commitFor, SECRET } = await deploy();
+      await commitFor("stolenkey", mallory, guardianHash(aliceKey));
       const node = await qns.read.nodeOf(["stolenkey"]);
       const deadline = (await now()) + 600n;
       // Mallory names Alice's public key as guardian but can only sign with her own key.
       const msg = await qns.read.authMessage([ACTIONS.REGISTER, node, mallory.account.address, 0n, deadline, guardianHash(aliceKey)]);
       const { signature } = signAuth(malloryKey, msg);
       await viem.assertions.revertWithCustomError(
-        qns.write.register(["stolenkey", 1n, toHex(aliceKey.publicKey), signature, deadline], {
+        qns.write.register(["stolenkey", 1n, toHex(aliceKey.publicKey), signature, deadline, SECRET], {
           value: parseEther("1"),
           account: mallory.account,
         }),
@@ -156,24 +169,78 @@ describe("QNS - Qore Name Service", async () => {
     });
 
     it("can use the account's own on-chain PQC key (pqcKeyStatus) as guardian", async () => {
-      const { qns, pre } = await deploy();
+      const { qns, pre, commitFor, SECRET } = await deploy();
       const pk = toHex(bobKey.publicKey);
+      await commitFor("bobby", bob, zeroHash);
       await viem.assertions.revertWithCustomError(
-        qns.write.register(["bobby", 1n, "0x", "0x", 0n], { value: parseEther("1"), account: bob.account }),
+        qns.write.register(["bobby", 1n, "0x", "0x", 0n, SECRET], { value: parseEther("1"), account: bob.account }),
         qns,
         "AccountKeyMissing",
       );
       // Registered but without a proof of possession: still refused.
       await pre.keyStatus.write.setKeyStatus([bob.account.address, true, 1, pk, false]);
       await viem.assertions.revertWithCustomError(
-        qns.write.register(["bobby", 1n, "0x", "0x", 0n], { value: parseEther("1"), account: bob.account }),
+        qns.write.register(["bobby", 1n, "0x", "0x", 0n, SECRET], { value: parseEther("1"), account: bob.account }),
         qns,
         "AccountKeyMissing",
       );
       await pre.keyStatus.write.setKeyStatus([bob.account.address, true, 1, pk, true]);
-      await qns.write.register(["bobby", 1n, "0x", "0x", 0n], { value: parseEther("1"), account: bob.account });
+      await qns.write.register(["bobby", 1n, "0x", "0x", 0n, SECRET], { value: parseEther("1"), account: bob.account });
       const r = await qns.read.recordOf([await qns.read.nodeOf(["bobby"])]);
       assert.equal(r.guardian, keccak256(pk));
+    });
+
+    it("front-running: a name can only be registered by whoever committed to it", async () => {
+      const { qns, auth, commitFor, SECRET } = await deploy();
+      await commitFor("wanted", alice, guardianHash(aliceKey));
+      // Mallory sees Alice's register tx in the mempool and copies the label,
+      // but has no commitment of her own that has aged long enough.
+      const node = await qns.read.nodeOf(["wanted"]);
+      const m = await auth(malloryKey, ACTIONS.REGISTER, node, mallory.account.address, guardianHash(malloryKey));
+      await viem.assertions.revertWithCustomError(
+        qns.write.register(["wanted", 1n, m.pubkey, m.signature, m.deadline, SECRET], {
+          value: parseEther("1"),
+          account: mallory.account,
+        }),
+        qns,
+        "CommitmentMissing",
+      );
+      // A fresh commitment is not enough either: it must be at least 60 s old.
+      await commitFor("wanted", mallory, guardianHash(malloryKey), SECRET, 0);
+      const m2 = await auth(malloryKey, ACTIONS.REGISTER, node, mallory.account.address, guardianHash(malloryKey));
+      await viem.assertions.revertWithCustomError(
+        qns.write.register(["wanted", 1n, m2.pubkey, m2.signature, m2.deadline, SECRET], {
+          value: parseEther("1"),
+          account: mallory.account,
+        }),
+        qns,
+        "CommitmentTooNew",
+      );
+      // Alice's own reveal goes through.
+      const a = await auth(aliceKey, ACTIONS.REGISTER, node, alice.account.address, guardianHash(aliceKey));
+      await qns.write.register(["wanted", 1n, a.pubkey, a.signature, a.deadline, SECRET], {
+        value: parseEther("1"),
+        account: alice.account,
+      });
+      assert.equal((await qns.read.recordOf([node])).owner.toLowerCase(), alice.account.address.toLowerCase());
+    });
+
+    it("rejects commitments older than a day and a reused commitment", async () => {
+      const { qns, auth, commitFor, SECRET } = await deploy();
+      await commitFor("stale", alice, guardianHash(aliceKey), SECRET, 24 * 3600 + 10);
+      const node = await qns.read.nodeOf(["stale"]);
+      const a = await auth(aliceKey, ACTIONS.REGISTER, node, alice.account.address, guardianHash(aliceKey));
+      await viem.assertions.revertWithCustomError(
+        qns.write.register(["stale", 1n, a.pubkey, a.signature, a.deadline, SECRET], {
+          value: parseEther("1"),
+          account: alice.account,
+        }),
+        qns,
+        "CommitmentTooOld",
+      );
+      const c = await qns.read.makeCommitment(["fresh", alice.account.address, guardianHash(aliceKey), SECRET]);
+      await qns.write.commit([c], { account: alice.account });
+      await viem.assertions.revertWithCustomError(qns.write.commit([c], { account: alice.account }), qns, "UnexpiredCommitment");
     });
   });
 
@@ -382,6 +449,25 @@ describe("QNS - Qore Name Service", async () => {
       const p = await auth(adminKey, ACTIONS.ADMIN_SET_PRICES, zeroHash, deployer.account.address, enc([{ type: "uint256[3]" }], [prices]));
       await qns.write.setPrices([[...prices], p.pubkey, p.signature, p.deadline]);
       assert.equal(await qns.read.rentPrice(["abcdef", 1n]), 3n);
+    });
+
+    it("a used admin signature cannot be replayed, for the same or another action", async () => {
+      const { qns, auth, register } = await deploy();
+      await register("fees3");
+      const amount = parseEther("1");
+      const payload = enc([{ type: "address" }, { type: "uint256" }], [deployer.account.address, amount]);
+      const a = await auth(adminKey, ACTIONS.ADMIN_WITHDRAW, zeroHash, deployer.account.address, payload);
+      await qns.write.withdraw([deployer.account.address, amount, a.pubkey, a.signature, a.deadline]);
+      await viem.assertions.revertWithCustomError(
+        qns.write.withdraw([deployer.account.address, amount, a.pubkey, a.signature, a.deadline]),
+        qns,
+        "PqcSignatureInvalid",
+      );
+      await viem.assertions.revertWithCustomError(
+        qns.write.setPrices([[1n, 1n, 1n], a.pubkey, a.signature, a.deadline]),
+        qns,
+        "PqcSignatureInvalid",
+      );
     });
 
     it("reports the gas of a post-quantum guarded action", async () => {
