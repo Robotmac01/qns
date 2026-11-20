@@ -153,7 +153,8 @@ Run with the QoreChain AI Smart Contract Auditor (dashboard.qorechain.io/audit).
 
 - Stage 1, before fixes: [public report](https://qorechain-audit-reports-362958365954.s3.amazonaws.com/audits/QCAIA-1795172541719-CBA385BF/report.html), [findings and responses](audits/QCAI-stage-1.md). Score 78, Medium, 5 findings. One real issue
   (front-running at registration) fixed with commit-reveal; the rest answered in the report.
-- [Stage 2, after fixes](audits/QCAI-stage-2.md)
+- Stage 2, after fixes: [public report](https://qorechain-audit-reports-362958365954.s3.amazonaws.com/audits/QCAIA-1795175304137-55ED5F0A/report.html), [findings and responses](audits/QCAI-stage-2.md). Score 82, Medium, 6 findings.
+  Front-running dropped to Low; no new real issues.
 
 ## Credits
 
