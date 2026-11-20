@@ -30,6 +30,7 @@ Built for **Build Before Q-Day** (QoreChain Developer Fest), **Post-Quantum dApp
 | Network | QoreChain testnet `qorechain-diana`, EVM chain id 9800 |
 | QNS contract | [`0x828a6E483C5A2c83C013B51f6058E987728D2348`](https://explore.qore.network/address/0x828a6E483C5A2c83C013B51f6058E987728D2348) |
 | Example name | `okafor.qore` → `0xcf8239ff696253a5ec21b4d7db9fd6d43c3cd35f` (`qor1e7prnlmfvff6tmppkntah87k6s7re56ldawxpp`), set with a post-quantum guarded [`setAddr`](https://explore.qore.network/tx/0x18706d4a56b9f03ec5e2e156560e0cc0cf3f9205750be4f2ff4e183c45d5329e) |
+| Live app | https://qns-two.vercel.app |
 | Explorer | https://explore.qore.network |
 
 ## How it works
